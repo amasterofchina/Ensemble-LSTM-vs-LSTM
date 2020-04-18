@@ -1,0 +1,221 @@
+import keras 
+from keras.layers.advanced_activations import LeakyReLU
+from keras.utils import to_categorical
+from keras.models import Sequential
+from keras import initializers
+from keras.layers import Merge, LSTM, Dense
+from keras.layers.core import Dense, Activation, Dropout
+from keras import metrics
+from keras.optimizers import SGD
+from keras.models import load_model
+from keras.callbacks import *
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import pydot
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler,scale
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score,accuracy_score
+print(tf.__version__)
+print(keras.__version__)
+from keras.backend.tensorflow_backend import set_session
+config = tf.ConfigProto()
+config.gpu_options.allocator_type = 'BFC' #A "Best-fit with coalescing" algorithm, simplified from a version of dlmalloc.
+config.gpu_options.per_process_gpu_memory_fraction = 0.5
+config.gpu_options.allow_growth = True
+set_session(tf.Session(config=config)) 
+data_dim_a = 13
+data_dim_b=9
+data_dim_c=2
+batch_size=10
+timesteps = 5
+epochs=1000
+lr=0.0001#0.002
+dropout_p=0.4
+
+encoder_a1 = Sequential()
+encoder_a1.add(LSTM(128, input_shape=(timesteps, data_dim_a),kernel_initializer='random_uniform',
+                bias_initializer='zeros',return_sequences=True,go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_a1.add(Dropout(dropout_p))
+encoder_a1.add(LSTM(128, input_shape=(timesteps, data_dim_a),kernel_initializer='random_uniform',
+                bias_initializer='zeros',return_sequences=True,go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_a1.add(Dropout(dropout_p))
+
+encoder_b1 = Sequential()
+encoder_b1.add(LSTM(128, input_shape=(timesteps, data_dim_b),return_sequences=True,kernel_initializer='random_uniform',
+                bias_initializer='zeros',go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_b1.add(Dropout(dropout_p))
+encoder_b1.add(LSTM(128, input_shape=(timesteps, data_dim_b),return_sequences=True,kernel_initializer='random_uniform',
+                bias_initializer='zeros',go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_b1.add(Dropout(dropout_p))
+
+encoder_c1 = Sequential()
+encoder_c1.add(LSTM(128, input_shape=(timesteps, data_dim_c),return_sequences=True,kernel_initializer='random_uniform',
+                bias_initializer='zeros',go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_c1.add(Dropout(dropout_p))
+encoder_c1.add(LSTM(128, input_shape=(timesteps, data_dim_c),return_sequences=True,kernel_initializer='random_uniform',
+                bias_initializer='zeros',go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+encoder_c1.add(Dropout(dropout_p))
+decoder1 = Sequential()
+decoder1.add(Merge([encoder_a1, encoder_b1,encoder_c1], mode='concat'))
+decoder1.add(Dense(32))
+decoder1.add(Dense(2,activation='softmax',kernel_initializer='random_uniform',bias_initializer='zeros'))
+rmsprop=keras.optimizers.RMSprop(lr=lr, rho=0.9, epsilon=1e-06)
+decoder1.compile(loss='sparse_categorical_crossentropy',optimizer=rmsprop,metrics=['sparse_categorical_accuracy'])#,metrics=['sparse_categorical_accuracy']
+#sparse_categorical_crossentropy  sparse_categorical_accuracy
+a=pd.read_csv('.../onestock/600031/train_a.csv',header=0)
+b=pd.read_csv('.../onestock/600031/train_b.csv',header=0,encoding='UTF-8')
+c=pd.read_csv('.../onestock/600031/train_c.csv',header=0,encoding='UTF-8')
+y=pd.read_csv('.../onestock/600031/train_label.csv',header=0)
+y=np.mat(y)
+
+val_a=pd.read_csv('.../onestock/600031/val_a.csv',header=0)#remove_noise13.csv
+val_b=pd.read_csv('.../onestock/600031/val_b.csv',header=0,encoding='UTF-8')
+val_c=pd.read_csv('.../onestock/600031/val_c.csv',header=0,encoding='UTF-8')
+y_val=pd.read_csv('.../onestock/600031/val_label.csv',header=0)#remove_noise13.csv
+y_val=np.mat(y_val)
+print("y_val",y_val.shape)
+test_a=pd.read_csv('.../onestock/600031/test_a.csv',header=0)
+test_b=pd.read_csv('.../onestock/600031/test_b.csv',header=0,encoding='UTF-8')
+test_c=pd.read_csv('.../onestock/600031/test_c.csv',header=0,encoding='UTF-8')
+y_test=pd.read_csv('.../onestock/600031/test_label.csv',header=0)#remove_noise13.csv
+y_test=np.mat(y_test)
+
+#训练集
+a=scale(a)
+b=scale(b)
+c=scale(c)
+x_train_a = a
+x_train_a=x_train_a.reshape(150,timesteps,13)
+x_train_b = b
+x_train_b=x_train_b.reshape(150,timesteps,9)
+x_train_c = c
+x_train_c=x_train_c.reshape(150,timesteps,2)
+y_train = y
+y_train=y_train.reshape(150,timesteps,1)
+y_train=np.expand_dims(y_train,-1)
+
+#验证集
+val_a=scale(val_a)
+val_b=scale(val_b)
+val_c=scale(val_c)
+x_val_a = val_a
+x_val_a=x_val_a.reshape(36,timesteps,13)#1800
+x_val_b = val_b
+x_val_b=x_val_b.reshape(36,timesteps,9)#1800
+x_val_c = val_c
+x_val_c=x_val_c.reshape(36,timesteps,2)#1800
+y_val = y_val
+y_val=y_val.reshape(36,timesteps,1)#1800
+y_val=np.expand_dims(y_val,-1)
+
+#测试集
+test_a=scale(test_a)
+test_b=scale(test_b)
+test_c=scale(test_c)
+x_test_a = test_a
+x_test_a=x_test_a.reshape(37,timesteps,13)#1800
+x_test_b = test_b
+x_test_b=x_test_b.reshape(37,timesteps,9)#1800
+x_test_c = test_c
+x_test_c=x_test_c.reshape(37,timesteps,2)#1800
+y_test = y_test
+y_test=y_test.reshape(37,timesteps,1)#1800
+y_test2=np.expand_dims(y_test,-1)
+
+
+es=keras.callbacks.EarlyStopping(monitor='val_sparse_categorical_accuracy', min_delta=0, patience=50, verbose=1, 
+                                        mode='max')
+
+hist1=decoder1.fit([x_train_a, x_train_b,x_train_c], y_train,batch_size=batch_size, 
+                 epochs=epochs,callbacks = [es],shuffle=False,
+                   validation_data=([x_val_a,x_val_b, x_val_c], y_val))
+#------------------------------------------------------------------------------------------------------------------
+"LSTM neural network for predicting "
+
+data_dim= 24
+batch_size=14
+timesteps = 5
+epochs=1000
+lr=0.0001#0.002
+dropout_p=0.4
+model = Sequential()
+model.add(LSTM(128, input_shape=(timesteps, data_dim),kernel_initializer='random_uniform',
+            bias_initializer='zeros',return_sequences=True,go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+model.add(Dropout(dropout_p))
+model.add(LSTM(128, input_shape=(timesteps, data_dim),kernel_initializer='random_uniform',
+                bias_initializer='zeros',return_sequences=True,go_backwards=True,activation='sigmoid', inner_activation='tanh'))
+model.add(Dropout(dropout_p))
+model.add(Dense(2,activation='softmax',kernel_initializer='random_uniform',bias_initializer='zeros'))
+
+rmsprop=keras.optimizers.RMSprop(lr=lr, rho=0.9, epsilon=1e-06)
+model.compile(loss='sparse_categorical_crossentropy',optimizer=rmsprop,metrics=['sparse_categorical_accuracy'])#,metrics=['sparse_categorical_accuracy']
+
+x=pd.read_csv('.../onestock/600031/BigTrain.csv',header=0)
+print(x.shape)
+y=pd.read_csv('.../onestock/600031/train_label.csv',header=0)
+y=np.mat(y)
+
+val_x=pd.read_csv('.../onestock/600031/BigVal.csv',header=0)#remove_noise13.csv
+y_val=pd.read_csv('.../onestock/600031/val_label.csv',header=0)#remove_noise13.csv
+y_val=np.mat(y_val)
+
+#训练集
+x=scale(x)
+print("训练的x,y形状：",x.shape)
+x_train = x
+x_train=x_train.reshape(150,timesteps,data_dim)#7800
+y_train = y
+y_train=y_train.reshape(150,timesteps,1)#7800
+y_train=np.expand_dims(y_train,-1)
+test_x=pd.read_csv('.../onestock/600031/BigTest.csv',header=0)#remove_noise13.csv
+y_test=pd.read_csv('.../onestock/600031/test_label.csv',header=0)#remove_noise13.csv
+y_test3=np.mat(y_test)
+test_x=scale(test_x)
+x_test = test_x
+x_test=x_test.reshape(37,timesteps,data_dim)#1800
+y_test3=y_test3.reshape(37,timesteps,1)#1800
+y_test3=np.expand_dims(y_test3,-1)
+
+#验证集
+val_x=scale(val_x)
+x_val = val_x
+x_val=x_val.reshape(36,timesteps,data_dim)#1800
+y_val=y_val.reshape(36,timesteps,1)#1800
+y_val=np.expand_dims(y_val,-1)
+es=keras.callbacks.EarlyStopping(monitor='val_sparse_categorical_accuracy', min_delta=0, patience=50, verbose=1, 
+                                        mode='max')
+
+hist=model.fit(x_train, y_train,batch_size=batch_size, 
+                 epochs=epochs,callbacks = [es],shuffle=False,validation_data=(x_val, y_val))
+
+
+#---------------------------------------------------------------------------------------------------------------
+#compare
+plt.figure(figsize=(5,3))
+plt.title('val_accuracy',fontsize=10)
+plt.plot(hist.history['val_sparse_categorical_accuracy'],label='LSTM',linewidth=1,c='blue')
+plt.plot(hist1.history['val_sparse_categorical_accuracy'],label='Ensemble LSTM',linewidth=0.8,c='k',linestyle='--')
+#plt.plot(hist_3.history['val_sparse_categorical_accuracy'],label='lr=0.01',linewidth=1,c='green')
+#plt.plot(hist.history['val_sparse_categorical_accuracy'],label='lr=0.001',linewidth=1,c='blue')
+#plt.plot(hist.history['val_sparse_categorical_accuracy'], label='Val_acc',c='black')
+plt.rcParams['font.sans-serif'] = ['SimHei']  
+plt.rcParams['axes.unicode_minus'] = False
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right', fontsize=10)
+plt.show()
+
+plt.figure(figsize=(5,3))
+plt.title('train_accuracy',fontsize=10)
+plt.plot(hist.history['sparse_categorical_accuracy'],label='LSTM',linewidth=1,c='blue')
+plt.plot(hist1.history['sparse_categorical_accuracy'],label='Ensemble LSTM',linewidth=1,c='k',linestyle='--')
+#plt.plot(hist_3.history['val_sparse_categorical_accuracy'],label='lr=0.01',linewidth=1,c='green')
+#plt.plot(hist.history['val_sparse_categorical_accuracy'],label='lr=0.001',linewidth=1,c='blue')
+#plt.plot(hist.history['val_sparse_categorical_accuracy'], label='Val_acc',c='black')
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体设置
+plt.rcParams['axes.unicode_minus'] = False
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right', fontsize=10)
+plt.show()
